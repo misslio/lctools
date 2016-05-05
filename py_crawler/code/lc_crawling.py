@@ -1,4 +1,3 @@
-
 import asyncio
 import cgi
 from collections import namedtuple
@@ -7,10 +6,7 @@ import re 		#regular expression module
 import time
 import urllib.parse
 
-#try:
 from asyncio import JoinableQueue as Queue
-#except:
-#	from asyncio import Queue
 
 import aiohttp #install with "pip install aiohttp"
 
@@ -50,12 +46,9 @@ class Crawler:
 		self.done = []
 		self.session = aiohttp.ClientSession(loop=self.loop)
 		self.root_domains = set()
-		LOGGER.setLevel(logging.DEBUG)
 		print ('{}'.format(roots))
 		for root in roots:
-		#	print ('{}'.format(root))
 			parts = urllib.parse.urlparse(root)
-		#	print ('{}'.format(parts));
 			host, port = urllib.parse.splitport(parts.netloc)
 			print ('host: %s, port %s'%(host,port))
 			if not host:
