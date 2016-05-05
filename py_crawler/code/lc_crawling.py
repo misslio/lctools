@@ -7,14 +7,14 @@ import re 		#regular expression module
 import time
 import urllib.parse
 
-try:
-	from asyncio import JoniableQueue as Queue
-except:
-	from asyncio import Queue
+#try:
+from asyncio import JoinableQueue as Queue
+#except:
+#	from asyncio import Queue
 
 import aiohttp #install with "pip install aiohttp"
 
-LOGGER = logging.getlogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 # in: www.baidu.com out: baiducom
 def lenient_host(host):
@@ -37,8 +37,7 @@ class Crawler:
 	"""
 	def __init__(self, roots, exclude = None, 
 				strict = True, max_redirect = 10, 
-				max_tries = 4, max_tasks = 10, 
-				loop = None):
+				max_tries = 4, max_tasks = 10, * ,loop = None):
 		self.loop = loop or asyncio.get_event_loop()
 		self.roots = roots
 		self.exclude = exclude
@@ -51,9 +50,14 @@ class Crawler:
 		self.done = []
 		self.session = aiohttp.ClientSession(loop=self.loop)
 		self.root_domains = set()
+		LOGGER.setLevel(logging.DEBUG)
+		print ('{}'.format(roots))
 		for root in roots:
+		#	print ('{}'.format(root))
 			parts = urllib.parse.urlparse(root)
+		#	print ('{}'.format(parts));
 			host, port = urllib.parse.splitport(parts.netloc)
+			print ('host: %s, port %s'%(host,port))
 			if not host:
 				continue
 			if re.match(r'\A[\d\.]*\Z', host):	#about regular expression, not understand for now 
@@ -98,8 +102,7 @@ class Crawler:
 		This check for equality modulo an initial 'www.' component.
 		"""
 
-		host = host[4:] 
-		if host.startswith('www.') else 'www.' + host
+		host = host[4:] if host.startswith('www.') else 'www.' + host
 		return host in self.root_domains
 
 	def _host_okay_lenient(self, host):
@@ -116,28 +119,28 @@ class Crawler:
 		self.done.append(fetch_statistic)
 
 	@asyncio.coroutine
-	def parse_link(self, response)
+	def parse_link(self, response):
 		"""Return a FetchStatistic and list of links."""
 		links = set()
 		content_type = None
 		encoding = None
 		body = yield from response.read()
-
 		if response.status == 200:
-			content_type = response.headers.get('content_type')
+			content_type = response.headers.get('content-type')
 			pdict = {}
 
 			if content_type:
 				content_type, pdict = cgi.parse_header(content_type)
 
 			encoding = pdict.get('charset', 'utf-8')
-			if content_type in ('text/html','application/xml')
+			if content_type in ('text/html','application/xml'):
 				text = yield from response.text()
 
-				urls = set(re.findall(r'''(?i)href=["']([^\s"'<>]+)''', text)
+				urls = set(re.findall(r'''(?i)href=["']([^\s"'<>]+)''', text))
 
 				if urls:
 					LOGGER.info('got %r distinct urls from %r', len(urls), response.url)
+				
 
 				for url in urls:
 					normalized = urllib.parse.urljoin(response.url, url)
@@ -145,18 +148,18 @@ class Crawler:
 					if self.url_allowed(defragmented):
 							links.add(defragmented)
 
-			stat = FetchStatistic(
-				url = response.url,
-				next_url = None,
-				status = response.status,
-				exception = None,
-				size = len(body),
-				content_type = content_type,
-				encoding = encoding,
-				num_urls = len(links),
-				num_new_urls = len(links - self.seen_urls)
+		stat = FetchStatistic(
+			url = response.url,
+			next_url = None,
+			status = response.status,
+			exception = None,
+			size = len(body),
+			content_type = content_type,
+			encoding = encoding,
+			num_urls = len(links),
+			num_new_urls = len(links - self.seen_urls))
 
-			return stat, links
+		return stat, links
 
 
 
@@ -165,9 +168,10 @@ class Crawler:
 		"""Add a URL to the queue if not seen before."""
 		if max_redirect is None:
 			max_redirect = self.max_redirect
-		LOGGER.debuf('adding %r %r', url, max_redirect)
+		LOGGER.debug('adding %r %r', url, max_redirect)
 		self.seen_urls.add(url)
-		self.q.put_nowait(url, max_redirect)
+		print ('in add_url url:{}'.format(url))
+		self.q.put_nowait((url, max_redirect))
 
 
 
@@ -187,25 +191,25 @@ class Crawler:
 				LOGGER.info('try %r for %r raised %r', tries, url, client_error)
 				exception = client_error
 
-			tries += 1
-		else
-			LOGGER.error('%r failed after %r tries', url, self.max_tries)
-			self.record_statistic(FetchStatistic(url = url,
-												 next_url = None,
-												 status = None,
-												 exception = exception,
-												 size = 0,
-												 content_type = None,
-												 encoding = None,
-												 num_urls = 0,
-												 num_new_urls = 0))
-			return
+				tries += 1
+			else:
+				LOGGER.error('%r failed after %r tries', url, self.max_tries)
+				self.record_statistic(FetchStatistic(url = url,
+													 next_url = None,
+													 status = None,
+													 exception = exception,
+													 size = 0,
+													 content_type = None,
+													 encoding = None,
+													 num_urls = 0,
+												 	num_new_urls = 0))
+				return
 
 		try:
-            if is_redirect(response):
-                location = response.headers['location']
-                next_url = urllib.parse.urljoin(url, location)
-                self.record_statistic(FetchStatistic(url=url,
+			if is_redirect(response):
+				location = response.headers['location']
+				next_url = urllib.parse.urljoin(url, location)
+				self.record_statistic(FetchStatistic(url=url,
                                                      next_url=next_url,
                                                      status=response.status,
                                                      exception=None,
@@ -215,22 +219,22 @@ class Crawler:
                                                      num_urls=0,
                                                      num_new_urls=0))
 
-                if next_url in self.seen_urls:
-                    return
-                if max_redirect > 0:
-                    LOGGER.info('redirect to %r from %r', next_url, url)
-                    self.add_url(next_url, max_redirect - 1)
-                else:
-                    LOGGER.error('redirect limit reached for %r from %r',
+				if next_url in self.seen_urls:
+					return
+				if max_redirect > 0:
+					LOGGER.info('redirect to %r from %r', next_url, url)
+					self.add_url(next_url, max_redirect - 1)
+				else:
+					LOGGER.error('redirect limit reached for %r from %r',
                                  next_url, url)
-            else:
-                stat, links = yield from self.parse_links(response)
-                self.record_statistic(stat)
-                for link in links.difference(self.seen_urls):
-                    self.q.put_nowait((link, self.max_redirect))
-                self.seen_urls.update(links)
-        finally:
-            yield from response.release()
+			else:
+				stat, links = yield from self.parse_link(response)
+				self.record_statistic(stat)
+				for link in links.difference(self.seen_urls):
+					self.q.put_nowait((link, self.max_redirect))
+					self.seen_urls.update(links)
+		finally:
+			yield from response.release()
 
 
 
@@ -240,10 +244,10 @@ class Crawler:
 		"""Process queue items forever."""
 		try:
 			while True:
-				url, max_redirect = yield from self.q.get()
+				url, max_redirect = yield from self.q.get() 
 				assert url in self.seen_urls
 				yield from self.fetch(url, max_redirect)
-				self.q.task_done()
+				self.q.task_done() # send signal which job had done to the queue. add by lc
 		except asyncio.CancelledError:
 			pass
 
@@ -256,12 +260,12 @@ class Crawler:
 			return False
 		host, port = urllib.parse.splitport(parts.netloc)
 		if not self.host_okay(host):
-			LOGGER.debuf('skipping non-root host in %r', url)
+			LOGGER.debug('skipping non-root host in %r', url)
 			return False
 		return True
 
 	@asyncio.coroutine
-	def cral(self):
+	def crawl(self):
 		"""Run the crawler until all finished."""
 		workers = [asyncio.Task(self.work(), loop = self.loop)
 					for _ in range(self.max_tasks)]
@@ -270,3 +274,11 @@ class Crawler:
 		self.t1 = time.time()
 		for w in workers:
 			w.cancel()
+		self.session.close()
+
+if __name__ == "__main__":
+	loop = asyncio.get_event_loop()
+#	crawler = Crawler({'http://www.baidu.com'}, max_redirect = 10)
+	crawler = Crawler({'http://www.csdn.net'}, max_redirect = 10)
+	loop.run_until_complete(crawler.crawl())
+	

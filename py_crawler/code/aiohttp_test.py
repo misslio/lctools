@@ -1,11 +1,14 @@
 import aiohttp
 import asyncio
 
+@asyncio.coroutine
 def func():
 	with aiohttp.ClientSession() as session:
-		with session.get('http://www.baidu.com') as resp:
+			resp = yield from session.get('http://www.baidu.com')
 			print(resp.status)
-		#	print(await resp.text())
+			#print(resp.text)
+			session.close()
 
 if __name__ == '__main__':
-	func()
+	loop = asyncio.get_event_loop()
+	loop.run_until_complete(func());

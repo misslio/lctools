@@ -269,3 +269,5 @@ class Crawler:
         self.t1 = time.time()
         for w in workers:
             w.cancel()
+
+
