@@ -31,7 +31,11 @@ if __name__ == '__main__':
 	init_work()
 	start_work()
 	q.join()
+	
+	print ('name++++++++++++++++++++++')
+	
 	for i in range(num_threads):
 		q.put(None)
+
 	for t in threads:
 		t.join()
