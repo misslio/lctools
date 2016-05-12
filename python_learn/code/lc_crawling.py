@@ -12,6 +12,8 @@ import aiohttp #install with "pip install aiohttp"
 
 LOGGER = logging.getLogger(__name__)
 
+FLAG = True
+
 # in: www.baidu.com out: baiducom
 def lenient_host(host):
 	parts=  host.split('.')[-2:] #what's split doing
@@ -178,6 +180,7 @@ class Crawler:
 		while tries < self.max_tries:
 			try:
 				response = yield from self.session.get(url, allow_redirects = False)
+				print (response.text)
 				if tries > 1:
 					LOGGER.info('try %r for %r success', tries, url)
 				
@@ -272,7 +275,7 @@ class Crawler:
 
 if __name__ == "__main__":
 	loop = asyncio.get_event_loop()
-	crawler = Crawler({'http://www.baidu.com'}, max_redirect = 10)
+	crawler = Crawler({'http://www.zhihu.com'}, max_redirect = 10)
 #	crawler = Crawler({'http://www.csdn.net'}, max_redirect = 10)
 	loop.run_until_complete(crawler.crawl())
 	crawler.close()
