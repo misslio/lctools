@@ -16,10 +16,10 @@ def get_urls(url):
 			continue
 
 def get_href(page):
-	s = request.urlopen(page) #rllib.urlopen(page) #urllib.request.urlopen(page)
+	s = request.urlopen(page) 
 	hrefs = re.compile(r'<h2><a href="(.+?)".+?</a></h2>')
 	s = s.read()
-	s = s.decode('GBK')
+#	s = s.decode('GBK')
 	links = hrefs.findall(s)
 	return links
 
