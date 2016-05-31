@@ -1,0 +1,85 @@
+#include "packet_type.h"
+
+
+void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
+{
+	printf("len = %d\n", header->len);	
+	pcap_dumper_t *pdumper = (pcap_dumper_t *)args;
+
+	pcap_dump((u_char *)pdumper, header, packet);	
+	
+}
+
+
+
+int main(int argc, char *argv[1])
+{
+
+	char *dev = "wlp1s0";
+	char errbuf[PCAP_ERRBUF_SIZE];
+
+//	dev = pcap_lookupdev(errbuf);
+	if(NULL == dev){
+		fprintf(stderr, "Errinfo: %s\n", errbuf);
+		return -1;
+	}
+
+	printf("Device: %s\n", dev + 1);
+
+	pcap_t *handle;
+
+	handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+	if(NULL == handle){
+		fprintf(stderr, "Errinfo: %s\n", errbuf);
+		return -1;
+	}
+
+	if(pcap_datalink(handle) != DLT_EN10MB){
+		fprintf(stderr, "Device %s don't provide Ethernet headers - not supported\n", dev);
+		return -1;
+	}
+
+	pcap_dumper_t *pdumper;
+	pdumper = pcap_dump_open(handle, "./ttt.pcap");
+
+	struct bpf_program fp;
+	//src or dst net 192.168.77.131 and dst net 14.215.9.85
+	char filter_exp[] = "src or dst net 175.43.20.81";
+	bpf_u_int32 mask;
+	bpf_u_int32 net;
+
+	if(argc == 1){
+		if(pcap_compile(handle, &fp, filter_exp, 0, net) == -1){
+			fprintf(stderr, "Couldn't parser filter\n");
+			return -1;
+		}
+	}else {
+		if(pcap_compile(handle, &fp, argv[1], 0, net) == -1){
+			fprintf(stderr, "Couldn't parser filter\n");
+			return -1;
+		}	
+	}
+
+	if(pcap_setfilter(handle, &fp) == -1){
+		fprintf(stderr, "Counldn't install filter.\n");
+		return -1;
+	}
+
+	struct pcap_pkthdr header;
+	const u_char *packet;
+
+	memset(&header, 0, sizeof(header));
+	
+	pcap_loop(handle, 50, got_packet, (u_char *)pdumper);
+
+	pcap_dump_flush(pdumper);
+	pcap_dump_close(pdumper);
+	
+	pcap_close(handle);
+	return 0;
+}
+
+
+
+
+

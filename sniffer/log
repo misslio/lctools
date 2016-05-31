@@ -1,0 +1,50 @@
+SYN  count : 1
+SYN  ACK  count : 2
+ACK  count : 3
+PUSH ACK  ACK  count : 4
+ACK  count : 5
+PUSH ACK  ACK  count : 6
+ACK  count : 7
+PUSH ACK  ACK  count : 8
+PUSH ACK  ACK  count : 9
+ACK  count : 10
+ACK  count : 11
+PUSH ACK  ACK  count : 12
+ACK  count : 13
+PUSH ACK  ACK  count : 14
+ACK  count : 15
+PUSH ACK  ACK  count : 16
+ACK  count : 17
+PUSH ACK  ACK  count : 18
+ACK  count : 19
+PUSH ACK  ACK  count : 20
+ACK  count : 21
+ACK  count : 22
+ACK  count : 23
+PUSH ACK  ACK  count : 24
+ACK  count : 25
+PUSH ACK  ACK  count : 26
+ACK  count : 27
+ACK  count : 28
+PUSH ACK  ACK  count : 29
+ACK  count : 30
+ACK  count : 31
+ACK  count : 32
+PUSH ACK  ACK  count : 33
+ACK  count : 34
+ACK  count : 35
+PUSH ACK  ACK  count : 36
+ACK  count : 37
+SYN  count : 38
+SYN  count : 39
+SYN  count : 40
+SYN  count : 41
+SYN  count : 42
+ACK  count : 43
+ACK  count : 44
+ACK  count : 45
+PUSH ACK  ACK  count : 46
+PUSH ACK  ACK  count : 47
+ACK  count : 48
+PUSH ACK  ACK  count : 49
+SYN  ACK  count : 50

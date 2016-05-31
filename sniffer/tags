@@ -1,0 +1,69 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+PACKET_TYPE_H	packet_type.h	2;"	d
+SNIFF_ETHER_ADDR_LEN	packet_type.h	10;"	d
+SNIFF_IP_DF	packet_type.h	28;"	d
+SNIFF_IP_HL	packet_type.h	37;"	d
+SNIFF_IP_MF	packet_type.h	29;"	d
+SNIFF_IP_OFFMASK	packet_type.h	30;"	d
+SNIFF_IP_RF	packet_type.h	27;"	d
+SNIFF_IP_V	packet_type.h	38;"	d
+SNIFF_SIZE_ETHERNET	packet_type.h	18;"	d
+SNIFF_TH_ACK	packet_type.h	57;"	d
+SNIFF_TH_CWR	packet_type.h	60;"	d
+SNIFF_TH_ECE	packet_type.h	59;"	d
+SNIFF_TH_FIN	packet_type.h	53;"	d
+SNIFF_TH_FLAGS	packet_type.h	61;"	d
+SNIFF_TH_OFF	packet_type.h	50;"	d
+SNIFF_TH_PUSH	packet_type.h	56;"	d
+SNIFF_TH_RST	packet_type.h	55;"	d
+SNIFF_TH_SYN	packet_type.h	54;"	d
+SNIFF_TH_URG	packet_type.h	58;"	d
+_pkt_info	packet_type.h	/^typedef struct _pkt_info{$/;"	s
+_tcp_session	packet_type.h	/^typedef struct _tcp_session{$/;"	s
+dport	packet_type.h	/^	u_short dport;$/;"	m	struct:_tcp_session
+ether_dhost	packet_type.h	/^	u_char ether_dhost[SNIFF_ETHER_ADDR_LEN];	\/* 6 bytes destination addr *\/$/;"	m	struct:sniff_ethernet
+ether_shost	packet_type.h	/^	u_char ether_shost[SNIFF_ETHER_ADDR_LEN];	\/* 6 bytes source addr *\/$/;"	m	struct:sniff_ethernet
+ether_type	packet_type.h	/^	u_short	ether_type;		\/* 2 bytes tyep*\/$/;"	m	struct:sniff_ethernet
+ethernet	packet_type.h	/^	struct sniff_ethernet *ethernet;$/;"	m	struct:_pkt_info	typeref:struct:_pkt_info::sniff_ethernet
+get_payload	sniffer.c	/^u_char * get_payload(const u_char *packet, pkt_info_t *pkt_info)$/;"	f
+got_packet	sniffer.c	/^void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)$/;"	f
+ip	packet_type.h	/^	struct sniff_ip	*ip;$/;"	m	struct:_pkt_info	typeref:struct:_pkt_info::sniff_ip
+ip_des	packet_type.h	/^	struct in_addr ip_des;$/;"	m	struct:_tcp_session	typeref:struct:_tcp_session::in_addr
+ip_dst	packet_type.h	/^	struct in_addr ip_src, ip_dst;	\/* source and dest address *\/$/;"	m	struct:sniff_ip	typeref:struct:sniff_ip::
+ip_id	packet_type.h	/^	u_short ip_id; 	\/* identification *\/$/;"	m	struct:sniff_ip
+ip_len	packet_type.h	/^	u_short ip_len;	\/* total length *\/$/;"	m	struct:sniff_ip
+ip_off	packet_type.h	/^	u_short ip_off;	\/* fragment offset field *\/$/;"	m	struct:sniff_ip
+ip_p	packet_type.h	/^	u_char ip_p;	\/* protocol *\/$/;"	m	struct:sniff_ip
+ip_src	packet_type.h	/^	struct in_addr ip_src, ip_dst;	\/* source and dest address *\/$/;"	m	struct:sniff_ip	typeref:struct:sniff_ip::in_addr
+ip_src	packet_type.h	/^	struct in_addr ip_src;$/;"	m	struct:_tcp_session	typeref:struct:_tcp_session::in_addr
+ip_sum	packet_type.h	/^	u_short ip_sum;	\/* checksum *\/$/;"	m	struct:sniff_ip
+ip_tos	packet_type.h	/^	u_char ip_tos;	\/* type of service TOS *\/$/;"	m	struct:sniff_ip
+ip_ttl	packet_type.h	/^	u_char ip_ttl;	\/* time to live *\/$/;"	m	struct:sniff_ip
+ip_vh1	packet_type.h	/^	u_char ip_vh1;	\/* 4 bits in lower is version, 4 bits in higher is length of head *\/$/;"	m	struct:sniff_ip
+main	sniffer.c	/^int main(int argc, char *argv[1])$/;"	f
+payload	packet_type.h	/^	u_char *payload;$/;"	m	struct:_pkt_info
+pkt_info_t	packet_type.h	/^}pkt_info_t;$/;"	t	typeref:struct:_pkt_info
+same_session	sniffer.c	/^int same_session(tcp_session_t *ses, pkt_info_t *pkt_info)$/;"	f
+ses	sniffer.c	/^tcp_session_t ses;$/;"	v
+ses_init_flag	sniffer.c	/^static int ses_init_flag = 0;$/;"	v	file:
+sniff_ethernet	packet_type.h	/^struct sniff_ethernet{$/;"	s
+sniff_ip	packet_type.h	/^struct sniff_ip{$/;"	s
+sniff_tcp	packet_type.h	/^struct sniff_tcp{$/;"	s
+sport	packet_type.h	/^	u_short sport;$/;"	m	struct:_tcp_session
+tcp	packet_type.h	/^	struct sniff_tcp *tcp;$/;"	m	struct:_pkt_info	typeref:struct:_pkt_info::sniff_tcp
+tcp_seq_t	packet_type.h	/^typedef uint32_t tcp_seq_t;$/;"	t
+tcp_session_t	packet_type.h	/^}tcp_session_t;$/;"	t	typeref:struct:_tcp_session
+th_ack	packet_type.h	/^	tcp_seq_t th_ack;		\/* acknowledgement number *\/$/;"	m	struct:sniff_tcp
+th_dport	packet_type.h	/^	u_short th_dport;	\/* dest prot *\/$/;"	m	struct:sniff_tcp
+th_flags	packet_type.h	/^	u_char th_flags;$/;"	m	struct:sniff_tcp
+th_offx2	packet_type.h	/^	u_char th_offx2;		\/* data offset, rsvd *\/$/;"	m	struct:sniff_tcp
+th_seq	packet_type.h	/^	tcp_seq_t th_seq;		\/* sequence number *\/$/;"	m	struct:sniff_tcp
+th_sport	packet_type.h	/^	u_short th_sport;	\/* source port *\/$/;"	m	struct:sniff_tcp
+th_sum	packet_type.h	/^	u_short th_sum;		\/* checksum *\/$/;"	m	struct:sniff_tcp
+th_urp	packet_type.h	/^	u_short th_urp;		\/* urgent pointer *\/$/;"	m	struct:sniff_tcp
+th_win	packet_type.h	/^	u_short th_win;		\/* window *\/$/;"	m	struct:sniff_tcp
