@@ -76,7 +76,7 @@ int main()
 
 	struct bpf_program fp;
 	//src or dst net 192.168.77.131 and dst net 14.215.9.85
-	char filter_exp[] = "src or dst net 14.215.9.85";
+	char filter_exp[] = "src or dst net 113.98.246.81";
 	bpf_u_int32 mask;
 	bpf_u_int32 net;
 
@@ -95,7 +95,7 @@ int main()
 
 	memset(&header, 0, sizeof(header));
 	
-	pcap_loop(handle, 50, got_packet, (u_char *)pdumper);
+	pcap_loop(handle, 1000, got_packet, (u_char *)pdumper);
 
 	pcap_dump_flush(pdumper);
 	pcap_dump_close(pdumper);
