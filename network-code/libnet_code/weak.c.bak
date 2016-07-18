@@ -1,0 +1,23 @@
+#include <stdio.h>
+#include <libnet.h>
+
+int main()
+{
+	char err_buf[LIBNET_ERRBUF_SIZE];
+	
+	libnet_t *ln;
+	char *device = "eno16777736";
+
+	memset(err_buf, 0, LIBNET_ERRBUF_SIZE);
+//	ln = libnet_init(LIBNET_LINK, device, err_buf);
+	ln = libnet_init(LIBNET_LINK, NULL, err_buf);
+	if(NULL == ln){
+		fprintf(stderr, "libnet_init error! err_buf: %s\n", err_buf);
+		return -1;
+	}
+
+	printf("using device: %s\n", ln->device);
+
+
+	return 0;
+}
