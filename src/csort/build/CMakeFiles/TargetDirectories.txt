@@ -1,0 +1,1 @@
+/mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles/insertsort_test.dir

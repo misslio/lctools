@@ -1,0 +1,1 @@
+/usr/bin/cc      CMakeFiles/insertsort_test.dir/Insertsort.o CMakeFiles/insertsort_test.dir/Insertsort_test.o  -o bin/insertsort_test -rdynamic 
