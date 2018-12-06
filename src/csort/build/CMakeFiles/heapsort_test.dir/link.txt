@@ -1,0 +1,1 @@
+/usr/bin/cc      CMakeFiles/heapsort_test.dir/Heapsort.o CMakeFiles/heapsort_test.dir/Heapsort_test.o  -o bin/heapsort_test -rdynamic 

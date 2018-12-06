@@ -1,0 +1,1 @@
+/usr/bin/cc      CMakeFiles/shellsort_test.dir/Shellsort.o CMakeFiles/shellsort_test.dir/Shellsort_test.o  -o bin/shellsort_test -rdynamic 

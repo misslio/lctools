@@ -39,5 +39,7 @@ SET(CMAKE_MAKEFILE_PRODUCTS
 
 # Dependency information for all targets:
 SET(CMAKE_DEPEND_INFO_FILES
+  "CMakeFiles/heapsort_test.dir/DependInfo.cmake"
   "CMakeFiles/insertsort_test.dir/DependInfo.cmake"
+  "CMakeFiles/shellsort_test.dir/DependInfo.cmake"
   )
