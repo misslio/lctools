@@ -1,0 +1,26 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Bubblesort.c
+Bubblesort.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/Bubblesort.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Bubblesort.h
+def.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Bubblesort_test.c
+stdio.h
+-
+def.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+Bubblesort.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/Bubblesort.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+

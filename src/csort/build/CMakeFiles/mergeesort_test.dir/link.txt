@@ -1,0 +1,1 @@
+/usr/bin/cc      CMakeFiles/mergeesort_test.dir/Mergesort.o CMakeFiles/mergeesort_test.dir/Mergesort_test.o  -o bin/mergeesort_test -rdynamic 

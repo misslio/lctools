@@ -1,5 +1,5 @@
 /**
- * Copyright 2018©\2018 LICAN. All Rights Reserved
+ * Copyright 2018â€2018 LICAN. All Rights Reserved
  * @author - lc
  * @date - 2018-12-05
  **/
@@ -17,7 +17,7 @@ ElementType GetMax(ElementType A[], int N)
 	return max;
 }
 
-/* ¼ÙÉè´ıÅÅĞòÊı×é¶¼ÊÇÕıÕûÊı */
+/* å‡è®¾å¾…æ’åºæ•°ç»„éƒ½æ˜¯æ­£æ•´æ•° */
 void Bucketsort(ElementType A[], int N)
 {
 	ElementType *buckets, max;

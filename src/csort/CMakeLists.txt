@@ -14,3 +14,31 @@ add_executable(insertsort_test
 	Insertsort.c
 	Insertsort_test.c
 )
+
+add_executable(shellsort_test
+	Shellsort.c
+	Shellsort_test.c
+)
+
+add_executable(heapsort_test
+	Heapsort.c
+	Heapsort_test.c
+)
+
+add_executable(bubblesort_test
+	Bubblesort.c
+	Bubblesort_test.c
+)
+
+add_executable(mergeesort_test
+	Mergesort.c
+	Mergesort_test.c
+)
+
+add_executable(quicksort_test
+	Quicksort.c
+	Insertsort.c
+	Quicksort_test.c
+)
+
+

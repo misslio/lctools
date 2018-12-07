@@ -56,13 +56,48 @@ CMAKE_SOURCE_DIR = /mnt/hgfs/src/github_repo/lctools/src/csort
 CMAKE_BINARY_DIR = /mnt/hgfs/src/github_repo/lctools/src/csort/build
 
 #=============================================================================
+# Target rules for target CMakeFiles/bubblesort_test.dir
+
+# All Build rule for target.
+CMakeFiles/bubblesort_test.dir/all:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/depend
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/build
+	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  1 2
+	@echo "Built target bubblesort_test"
+.PHONY : CMakeFiles/bubblesort_test.dir/all
+
+# Include target in all.
+all: CMakeFiles/bubblesort_test.dir/all
+.PHONY : all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/bubblesort_test.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles 2
+	$(MAKE) -f CMakeFiles/Makefile2 CMakeFiles/bubblesort_test.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles 0
+.PHONY : CMakeFiles/bubblesort_test.dir/rule
+
+# Convenience name for target.
+bubblesort_test: CMakeFiles/bubblesort_test.dir/rule
+.PHONY : bubblesort_test
+
+# clean rule for target.
+CMakeFiles/bubblesort_test.dir/clean:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/clean
+.PHONY : CMakeFiles/bubblesort_test.dir/clean
+
+# clean rule for target.
+clean: CMakeFiles/bubblesort_test.dir/clean
+.PHONY : clean
+
+#=============================================================================
 # Target rules for target CMakeFiles/heapsort_test.dir
 
 # All Build rule for target.
 CMakeFiles/heapsort_test.dir/all:
 	$(MAKE) -f CMakeFiles/heapsort_test.dir/build.make CMakeFiles/heapsort_test.dir/depend
 	$(MAKE) -f CMakeFiles/heapsort_test.dir/build.make CMakeFiles/heapsort_test.dir/build
-	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  1 2
+	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  3 4
 	@echo "Built target heapsort_test"
 .PHONY : CMakeFiles/heapsort_test.dir/all
 
@@ -97,7 +132,7 @@ clean: CMakeFiles/heapsort_test.dir/clean
 CMakeFiles/insertsort_test.dir/all:
 	$(MAKE) -f CMakeFiles/insertsort_test.dir/build.make CMakeFiles/insertsort_test.dir/depend
 	$(MAKE) -f CMakeFiles/insertsort_test.dir/build.make CMakeFiles/insertsort_test.dir/build
-	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  3 4
+	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  5 6
 	@echo "Built target insertsort_test"
 .PHONY : CMakeFiles/insertsort_test.dir/all
 
@@ -126,13 +161,83 @@ clean: CMakeFiles/insertsort_test.dir/clean
 .PHONY : clean
 
 #=============================================================================
+# Target rules for target CMakeFiles/mergeesort_test.dir
+
+# All Build rule for target.
+CMakeFiles/mergeesort_test.dir/all:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/depend
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/build
+	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  7 8
+	@echo "Built target mergeesort_test"
+.PHONY : CMakeFiles/mergeesort_test.dir/all
+
+# Include target in all.
+all: CMakeFiles/mergeesort_test.dir/all
+.PHONY : all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/mergeesort_test.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles 2
+	$(MAKE) -f CMakeFiles/Makefile2 CMakeFiles/mergeesort_test.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles 0
+.PHONY : CMakeFiles/mergeesort_test.dir/rule
+
+# Convenience name for target.
+mergeesort_test: CMakeFiles/mergeesort_test.dir/rule
+.PHONY : mergeesort_test
+
+# clean rule for target.
+CMakeFiles/mergeesort_test.dir/clean:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/clean
+.PHONY : CMakeFiles/mergeesort_test.dir/clean
+
+# clean rule for target.
+clean: CMakeFiles/mergeesort_test.dir/clean
+.PHONY : clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/quicksort_test.dir
+
+# All Build rule for target.
+CMakeFiles/quicksort_test.dir/all:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/depend
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/build
+	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  9 10 11
+	@echo "Built target quicksort_test"
+.PHONY : CMakeFiles/quicksort_test.dir/all
+
+# Include target in all.
+all: CMakeFiles/quicksort_test.dir/all
+.PHONY : all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/quicksort_test.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles 3
+	$(MAKE) -f CMakeFiles/Makefile2 CMakeFiles/quicksort_test.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles 0
+.PHONY : CMakeFiles/quicksort_test.dir/rule
+
+# Convenience name for target.
+quicksort_test: CMakeFiles/quicksort_test.dir/rule
+.PHONY : quicksort_test
+
+# clean rule for target.
+CMakeFiles/quicksort_test.dir/clean:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/clean
+.PHONY : CMakeFiles/quicksort_test.dir/clean
+
+# clean rule for target.
+clean: CMakeFiles/quicksort_test.dir/clean
+.PHONY : clean
+
+#=============================================================================
 # Target rules for target CMakeFiles/shellsort_test.dir
 
 # All Build rule for target.
 CMakeFiles/shellsort_test.dir/all:
 	$(MAKE) -f CMakeFiles/shellsort_test.dir/build.make CMakeFiles/shellsort_test.dir/depend
 	$(MAKE) -f CMakeFiles/shellsort_test.dir/build.make CMakeFiles/shellsort_test.dir/build
-	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  5 6
+	$(CMAKE_COMMAND) -E cmake_progress_report /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles  12 13
 	@echo "Built target shellsort_test"
 .PHONY : CMakeFiles/shellsort_test.dir/all
 

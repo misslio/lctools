@@ -3,6 +3,7 @@
 
 CMakeFiles/heapsort_test.dir/Heapsort.o: ../Heapsort.c
 CMakeFiles/heapsort_test.dir/Heapsort.o: ../Heapsort.h
+CMakeFiles/heapsort_test.dir/Heapsort.o: ../def.h
 
 CMakeFiles/heapsort_test.dir/Heapsort_test.o: ../Heapsort.h
 CMakeFiles/heapsort_test.dir/Heapsort_test.o: ../Heapsort_test.c

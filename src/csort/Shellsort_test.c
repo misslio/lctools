@@ -1,9 +1,9 @@
 #include <stdio.h>
 
+#include "def.h"
+
 #include "Shellsort.h"
 
-
-#define PRINT_INT_ARRAY(A, LEN, index)	do{for(index = 0; index < LEN; index++){printf("%d ", A[index]);} printf("\n");}while(0)
 int main()
 {
 	ElementType a[] = {34, 8, 64, 51, 32, 21};

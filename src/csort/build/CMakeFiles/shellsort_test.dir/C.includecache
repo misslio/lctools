@@ -11,6 +11,8 @@ Shellsort.h
 /mnt/hgfs/src/github_repo/lctools/src/csort/Shellsort.h
 
 /mnt/hgfs/src/github_repo/lctools/src/csort/Shellsort.h
+def.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
 
 /mnt/hgfs/src/github_repo/lctools/src/csort/Shellsort_test.c
 stdio.h

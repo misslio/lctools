@@ -3,6 +3,7 @@
 
 CMakeFiles/shellsort_test.dir/Shellsort.o: ../Shellsort.c
 CMakeFiles/shellsort_test.dir/Shellsort.o: ../Shellsort.h
+CMakeFiles/shellsort_test.dir/Shellsort.o: ../def.h
 
 CMakeFiles/shellsort_test.dir/Shellsort_test.o: ../Shellsort.h
 CMakeFiles/shellsort_test.dir/Shellsort_test.o: ../Shellsort_test.c

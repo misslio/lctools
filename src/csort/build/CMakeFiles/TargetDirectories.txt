@@ -1,3 +1,6 @@
+/mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles/bubblesort_test.dir
 /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles/heapsort_test.dir
 /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles/insertsort_test.dir
+/mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles/mergeesort_test.dir
+/mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles/quicksort_test.dir
 /mnt/hgfs/src/github_repo/lctools/src/csort/build/CMakeFiles/shellsort_test.dir

@@ -1,0 +1,1 @@
+/usr/bin/cc      CMakeFiles/quicksort_test.dir/Quicksort.o CMakeFiles/quicksort_test.dir/Insertsort.o CMakeFiles/quicksort_test.dir/Quicksort_test.o  -o bin/quicksort_test -rdynamic 

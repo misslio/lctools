@@ -1,0 +1,20 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Insertsort.h
+def.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Quicksort.c
+def.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+Insertsort.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/Insertsort.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+

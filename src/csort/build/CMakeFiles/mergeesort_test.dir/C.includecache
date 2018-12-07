@@ -1,0 +1,28 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Mergesort.c
+stdlib.h
+-
+Mergesort.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/Mergesort.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Mergesort.h
+def.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/Mergesort_test.c
+stdio.h
+-
+def.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+Mergesort.h
+/mnt/hgfs/src/github_repo/lctools/src/csort/Mergesort.h
+
+/mnt/hgfs/src/github_repo/lctools/src/csort/def.h
+

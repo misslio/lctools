@@ -102,6 +102,19 @@ depend:
 .PHONY : depend
 
 #=============================================================================
+# Target rules for targets named bubblesort_test
+
+# Build rule for target.
+bubblesort_test: cmake_check_build_system
+	$(MAKE) -f CMakeFiles/Makefile2 bubblesort_test
+.PHONY : bubblesort_test
+
+# fast build rule for target.
+bubblesort_test/fast:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/build
+.PHONY : bubblesort_test/fast
+
+#=============================================================================
 # Target rules for targets named heapsort_test
 
 # Build rule for target.
@@ -128,6 +141,32 @@ insertsort_test/fast:
 .PHONY : insertsort_test/fast
 
 #=============================================================================
+# Target rules for targets named mergeesort_test
+
+# Build rule for target.
+mergeesort_test: cmake_check_build_system
+	$(MAKE) -f CMakeFiles/Makefile2 mergeesort_test
+.PHONY : mergeesort_test
+
+# fast build rule for target.
+mergeesort_test/fast:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/build
+.PHONY : mergeesort_test/fast
+
+#=============================================================================
+# Target rules for targets named quicksort_test
+
+# Build rule for target.
+quicksort_test: cmake_check_build_system
+	$(MAKE) -f CMakeFiles/Makefile2 quicksort_test
+.PHONY : quicksort_test
+
+# fast build rule for target.
+quicksort_test/fast:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/build
+.PHONY : quicksort_test/fast
+
+#=============================================================================
 # Target rules for targets named shellsort_test
 
 # Build rule for target.
@@ -139,6 +178,36 @@ shellsort_test: cmake_check_build_system
 shellsort_test/fast:
 	$(MAKE) -f CMakeFiles/shellsort_test.dir/build.make CMakeFiles/shellsort_test.dir/build
 .PHONY : shellsort_test/fast
+
+# target to build an object file
+Bubblesort.o:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/Bubblesort.o
+.PHONY : Bubblesort.o
+
+# target to preprocess a source file
+Bubblesort.i:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/Bubblesort.i
+.PHONY : Bubblesort.i
+
+# target to generate assembly for a file
+Bubblesort.s:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/Bubblesort.s
+.PHONY : Bubblesort.s
+
+# target to build an object file
+Bubblesort_test.o:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/Bubblesort_test.o
+.PHONY : Bubblesort_test.o
+
+# target to preprocess a source file
+Bubblesort_test.i:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/Bubblesort_test.i
+.PHONY : Bubblesort_test.i
+
+# target to generate assembly for a file
+Bubblesort_test.s:
+	$(MAKE) -f CMakeFiles/bubblesort_test.dir/build.make CMakeFiles/bubblesort_test.dir/Bubblesort_test.s
+.PHONY : Bubblesort_test.s
 
 # target to build an object file
 Heapsort.o:
@@ -173,16 +242,19 @@ Heapsort_test.s:
 # target to build an object file
 Insertsort.o:
 	$(MAKE) -f CMakeFiles/insertsort_test.dir/build.make CMakeFiles/insertsort_test.dir/Insertsort.o
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Insertsort.o
 .PHONY : Insertsort.o
 
 # target to preprocess a source file
 Insertsort.i:
 	$(MAKE) -f CMakeFiles/insertsort_test.dir/build.make CMakeFiles/insertsort_test.dir/Insertsort.i
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Insertsort.i
 .PHONY : Insertsort.i
 
 # target to generate assembly for a file
 Insertsort.s:
 	$(MAKE) -f CMakeFiles/insertsort_test.dir/build.make CMakeFiles/insertsort_test.dir/Insertsort.s
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Insertsort.s
 .PHONY : Insertsort.s
 
 # target to build an object file
@@ -199,6 +271,66 @@ Insertsort_test.i:
 Insertsort_test.s:
 	$(MAKE) -f CMakeFiles/insertsort_test.dir/build.make CMakeFiles/insertsort_test.dir/Insertsort_test.s
 .PHONY : Insertsort_test.s
+
+# target to build an object file
+Mergesort.o:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/Mergesort.o
+.PHONY : Mergesort.o
+
+# target to preprocess a source file
+Mergesort.i:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/Mergesort.i
+.PHONY : Mergesort.i
+
+# target to generate assembly for a file
+Mergesort.s:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/Mergesort.s
+.PHONY : Mergesort.s
+
+# target to build an object file
+Mergesort_test.o:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/Mergesort_test.o
+.PHONY : Mergesort_test.o
+
+# target to preprocess a source file
+Mergesort_test.i:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/Mergesort_test.i
+.PHONY : Mergesort_test.i
+
+# target to generate assembly for a file
+Mergesort_test.s:
+	$(MAKE) -f CMakeFiles/mergeesort_test.dir/build.make CMakeFiles/mergeesort_test.dir/Mergesort_test.s
+.PHONY : Mergesort_test.s
+
+# target to build an object file
+Quicksort.o:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Quicksort.o
+.PHONY : Quicksort.o
+
+# target to preprocess a source file
+Quicksort.i:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Quicksort.i
+.PHONY : Quicksort.i
+
+# target to generate assembly for a file
+Quicksort.s:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Quicksort.s
+.PHONY : Quicksort.s
+
+# target to build an object file
+Quicksort_test.o:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Quicksort_test.o
+.PHONY : Quicksort_test.o
+
+# target to preprocess a source file
+Quicksort_test.i:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Quicksort_test.i
+.PHONY : Quicksort_test.i
+
+# target to generate assembly for a file
+Quicksort_test.s:
+	$(MAKE) -f CMakeFiles/quicksort_test.dir/build.make CMakeFiles/quicksort_test.dir/Quicksort_test.s
+.PHONY : Quicksort_test.s
 
 # target to build an object file
 Shellsort.o:
@@ -236,11 +368,20 @@ help:
 	@echo "... all (the default if no target is provided)"
 	@echo "... clean"
 	@echo "... depend"
+	@echo "... bubblesort_test"
 	@echo "... edit_cache"
 	@echo "... heapsort_test"
 	@echo "... insertsort_test"
+	@echo "... mergeesort_test"
+	@echo "... quicksort_test"
 	@echo "... rebuild_cache"
 	@echo "... shellsort_test"
+	@echo "... Bubblesort.o"
+	@echo "... Bubblesort.i"
+	@echo "... Bubblesort.s"
+	@echo "... Bubblesort_test.o"
+	@echo "... Bubblesort_test.i"
+	@echo "... Bubblesort_test.s"
 	@echo "... Heapsort.o"
 	@echo "... Heapsort.i"
 	@echo "... Heapsort.s"
@@ -253,6 +394,18 @@ help:
 	@echo "... Insertsort_test.o"
 	@echo "... Insertsort_test.i"
 	@echo "... Insertsort_test.s"
+	@echo "... Mergesort.o"
+	@echo "... Mergesort.i"
+	@echo "... Mergesort.s"
+	@echo "... Mergesort_test.o"
+	@echo "... Mergesort_test.i"
+	@echo "... Mergesort_test.s"
+	@echo "... Quicksort.o"
+	@echo "... Quicksort.i"
+	@echo "... Quicksort.s"
+	@echo "... Quicksort_test.o"
+	@echo "... Quicksort_test.i"
+	@echo "... Quicksort_test.s"
 	@echo "... Shellsort.o"
 	@echo "... Shellsort.i"
 	@echo "... Shellsort.s"

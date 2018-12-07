@@ -10,5 +10,7 @@
 #define LCTOOLS_DEF_H
 
 #define PRINT_INT_ARRAY(A, LEN, index)	do{for(index = 0; index < LEN; index++){printf("%d ", A[index]);} printf("\n");}while(0)
+	
+typedef int ElementType;
 
 #endif /* LCTOOLS_DEF_H */

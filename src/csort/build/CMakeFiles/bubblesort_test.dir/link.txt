@@ -1,0 +1,1 @@
+/usr/bin/cc      CMakeFiles/bubblesort_test.dir/Bubblesort.o CMakeFiles/bubblesort_test.dir/Bubblesort_test.o  -o bin/bubblesort_test -rdynamic 
