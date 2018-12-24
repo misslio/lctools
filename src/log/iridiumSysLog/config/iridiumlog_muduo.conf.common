@@ -1,0 +1,74 @@
+#iridium_muduo.conf.common-V1.0.0
+#################### COMMON USAGE ######################
+
+#disable or enable configure file.
+# 0 - disable
+# 1 - enable
+@LOG_SWITCH=1
+
+#MODE_START: This is a example. A mode should start with a '-', then the remaining content
+#	         in this line will be considered a mode name, no matter what it is.
+#KEY_VALUES: The next lines are your key-value pairs.
+#END : "-end" is needed by every single mode. If not, this will be a confused configure.
+#-example
+#key1 = value1
+#key2 = value2
+#key3 = value3
+#-end
+#################### COMMON USAGE END #####################
+
+
+#################### SPECIAL USAGE FOR IRIDIUMLOG ######################
+#if this file is for writing log information to file. An example:
+#
+#-TOTAL_SWITCH
+#IS_VALID = 1
+#TIMER = 0  # 0 means no setting, positive means setting. after TIMER(seconds), debug level will be closed
+#DEBUG.INFO.ERR.FATAL = 0.1.1.1
+#LOG_FILE.FILE.FUNC.LINE.DATE = 1.1.1.1.1
+#LOG_TERMINAL.FILE.FUNC.LINE.DATE = 0.1.1.1.1
+#SINGLE_MAX_SIZE = 524288000	# 500 * 1024 * 1024
+#-end
+
+#-your_log_file_name.log
+#DEBUG.INFO.ERR.FATAL = 0.1.1.1
+#LOG_FILE.FILE.FUNC.LINE.DATE = 1.0.1.1.0
+#LOG_TERMINAL.FILE.FUNC.LINE.DATE = 0.1.0.1.0
+#ROLLBACK_NUMBER = 10
+#SINGLE_MAX_SIZE = 524288000	# 500 * 1024 * 1024
+#-end
+################### SPECIAL USAGE FOR IRIDIUMLOG END ######################
+
+#log switch for all of the log files
+-TOTAL_SWITCH
+IS_VALID = 0
+TIMMER = 10	#0 means close this function, > 0 means seconds to close DEBUG level log
+LOGINFO_MAX_LEN = 10240
+DEBUG.INFO.ERR.FATAL = 0.1.1.1
+LOG_FILE.FILE.FUNC.LINE.DATE = 1.0.1.1.1
+LOG_TERMINAL.FILE.FUNC.LINE.DATE = 0.1.1.1.1
+SINGLE_MAX_SIZE = 524288000	# 500 * 1024 * 1024
+IS_PROCESS_LOCK = 0
+-end
+
+
+#muduo_clog log level: TRACE, DEBUG, INFO, WARN, ERROR
+#Note : WARN and ERROR is always open. 
+#LOG_LEVEL = 0, open level: TRACE, DEBUG, INFO, WARN, ERROR
+#LOG_LEVEL = 1, open level: DEBUG, INFO, WARN, ERROR
+#LOG_LEVEL = 2, open level: INFO, WARN, ERROR
+#LOG_LEVEL = 3, open level: WARN, ERROR
+#LOG_LEVEL = 4, open level: WARN, ERROR
+#LOG_LEVEL > 4 or LOG_LEVEL < 0, open level: WARN, ERROR [This is illegal]
++muduo_clog
+LOG_LEVEL = 2 #[0-4] 0-TARCE,1-DEBUG,2-INFO,3-WARN,4-ERROR
+FILE_SIZE = 524288000	# 500 * 1024 * 1024
++end
+
+-iridiumlog_example.log
+DEBUG.INFO.ERR.FATAL = 0.1.1.1
+LOG_FILE.FILE.FUNC.LINE.DATE = 1.1.1.1.1
+LOG_TERMINAL.FILE.FUNC.LINE.DATE = 0.1.0.1.0
+SINGLE_MAX_SIZE = 524288000	# 500 * 1024 * 1024
+IS_PROCESS_LOCK = 0
+-end

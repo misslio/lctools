@@ -1,0 +1,3145 @@
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}
+/*
+ * Copyright 2015‐2018 77Element Co,Ltd. All Rights Reserved
+ * @file ‐ read_pcap_share_mem.c
+ * @brief ‐
+ * @author ‐ wpp
+ * @date ‐ 2018年4月18日
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+
+#include "include/log.h"
+#include "agency/read_pcap.h"
+#include "utils/share_mem_fifo/share_mem_fifo.h"
+#include "read_pcap_share_mem.h"
+
+#define RET_SUCCESS_VAL 0
+#define RET_FAILED_VAL -1
+
+#define sec_to_usec(s) ((s) * 1000000)
+
+#define PACKET_HEAD_LEN 13
+#define PACKET_DATA_MAX_LEN 65535
+
+#define WIRTE_READ_PAKET_STAT_LOG_INFO(fmt, args...) do{iridium_write_log("read_pkt_stat.log", IRILOG_INFO, fmt, ##args);}while(0)
+
+
+struct share_mem_handle
+{
+	gboolean is_run;
+	struct share_mem_fifo *packet_share_mem_fifo;
+	guint64 pkt_timestamp;
+	guint64 ts_usec;
+	struct packet_data pkt;
+	guint8 pkt_head[PACKET_HEAD_LEN];
+	guint8 *real_data;		//数据包地址
+
+};
+
+struct read_pkt_stat_tf
+{
+	guint64 packet;
+	guint64 traffic;
+	guint64 traffic_real;
+};
+
+
+struct share_mem_fifo *init_share_mem_fifo(const char *share_mem_name, guint32 size)
+{
+	struct share_mem_fifo *fifo = NULL;
+
+	if(!(fifo = alloc_share_mem_fifo(share_mem_name, size, \
+			RECREATE_SHM_FIFO_WHEN_KEY_NOT_IN_SYS | RECREATE_SHM_FIFO_WHEN_SIZE_NOT_MATCH))) {
+
+		IRIDIUM_LOG_ERR("str_smf_error:%s\n", str_smf_error());
+		return NULL;
+	}
+
+	return fifo;
+}
+
+/**
+ * @brief - 微妙级休眠
+ * @params -
+ * 		usec：休眠时间
+ * @author - wpp
+ * @date - 2018-04-18
+ * @ret - success 1， failed -1
+ **/
+static int microseconds_sleep(long usec)
+{
+	struct timeval sleep_tv;
+	sleep_tv.tv_sec = usec / 1000000;
+	sleep_tv.tv_usec = usec % 1000000;
+	return select(0, NULL, NULL, NULL, &sleep_tv);
+}
+
+struct packet_data *get_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	/*pthread_detach(pthread_self());*/
+
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+	struct packet_data *pkt = &handle_ptr->pkt;
+
+	unsigned int len;
+
+	while((handle_ptr->is_run)) {
+
+		//发送时间间隔包
+		if(handle_ptr->pkt_timestamp >= handle_ptr->ts_usec) {
+
+			pkt->wirelen = 0;
+			pkt->timestamp = handle_ptr->ts_usec;
+			pkt->rxport = 0;
+			pkt->type = PACKET_DATA_IS_KEEPALIVE;
+			pkt->data = NULL;
+
+			//为了使时间间隔包的的时间差一定60s，需要重新计算时间戳，因为数据包的时间戳精度不匹配
+			time_t ts_s = time(NULL) + 60;
+			handle_ptr->ts_usec = (ts_s / 60) * 60;
+			handle_ptr->ts_usec = sec_to_usec(handle_ptr->ts_usec);
+
+			return pkt;
+		}
+
+		len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->pkt_head, PACKET_HEAD_LEN);
+		g_assert((0 == len) || (PACKET_HEAD_LEN == len));
+
+		if((len > 0)) {
+			pkt->wirelen = *((guint32 *)(handle_ptr->pkt_head));
+			pkt->timestamp = *((guint64 *)(handle_ptr->pkt_head + 4));
+			pkt->rxport = handle_ptr->pkt_head[12];
+
+			pkt->type = PACKET_DATA_IS_PACKET;
+
+			//假定网口数量最大为64（我们目前也不支持这么多的网口），方便代码测试
+			g_assert((pkt->wirelen > 0) && (pkt->timestamp > 0) && (pkt->rxport < 64));
+
+			handle_ptr->pkt_timestamp = pkt->timestamp;
+
+			if((pkt->wirelen > PACKET_DATA_MAX_LEN)) {
+				share_mem_fifo_out_without_data(handle_ptr->packet_share_mem_fifo, pkt->wirelen);
+				IRIDIUM_LOG_ERR("read a huge packet, len=%u.\n", pkt->wirelen);
+				continue;
+			}
+
+			len = share_mem_fifo_out(handle_ptr->packet_share_mem_fifo, handle_ptr->real_data, pkt->wirelen);
+
+			g_assert(len == pkt->wirelen);
+
+			pkt->data = handle_ptr->real_data;
+
+			return pkt;
+
+		} else {
+			handle_ptr->pkt_timestamp = time(NULL);
+			handle_ptr->pkt_timestamp = sec_to_usec(handle_ptr->pkt_timestamp);
+
+			microseconds_sleep(2);
+			continue;
+		}
+	}
+
+	return NULL;
+}
+
+packet_share_mem_handle_t init_read_packet_info(struct share_mem_fifo *mem_fifo)
+{
+	struct share_mem_handle *read_pkt_handle = NULL;
+
+	g_assert(mem_fifo);
+
+	read_pkt_handle = malloc(sizeof(struct share_mem_handle));
+	memset(read_pkt_handle, 0, sizeof(struct share_mem_handle));
+
+	read_pkt_handle->is_run = 1;
+
+	read_pkt_handle->real_data = malloc(PACKET_DATA_MAX_LEN);
+
+	read_pkt_handle->ts_usec = (time(NULL) / 60) * 60 + 60;
+	read_pkt_handle->ts_usec = sec_to_usec(read_pkt_handle->ts_usec);
+
+	read_pkt_handle->packet_share_mem_fifo = mem_fifo;
+
+	return (packet_share_mem_handle_t)read_pkt_handle;
+}
+
+
+void stop_read_packet_from_share_mem(packet_share_mem_handle_t handle)
+{
+	((struct share_mem_handle *)handle)->is_run = 0;
+}
+
+void distroy_read_packet_handle(packet_share_mem_handle_t handle)
+{
+	struct share_mem_handle *handle_ptr = (struct share_mem_handle *)handle;
+
+	//防止读包时使用销毁的数据区
+	g_assert(0 == handle_ptr->is_run);
+
+	if(handle_ptr->real_data) {
+		free(handle_ptr->real_data);
+	}
+}

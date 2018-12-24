@@ -1,0 +1,1 @@
+add_executable(TestConfFileRead TestConfFileRead.cc ../ConfFileRead.cc)

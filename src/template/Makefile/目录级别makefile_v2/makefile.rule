@@ -1,0 +1,23 @@
+EXE = trust
+
+CC=gcc
+
+LFLAGS = -lpcap -lpthread
+LFLAGS += `pkg-config --cflags --libs glib-2.0`
+LFLAGS += -liridiumlog
+
+CFLAGS = -g -Wall
+
+ifeq ($(MARIADB), TRUE)
+LFLAGS += -lmysqlclient -L$(SRC_BASE)/iri_libs -lssnet
+CFLAGS += -DMARIADB
+endif
+
+
+ifeq ($(ASN), TRUE)
+CFLAGS += -fno-omit-frame-pointer
+CFLAGS += -fsanitize=address
+LFLAGS += -lasan
+endif
+
+

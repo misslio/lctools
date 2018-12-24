@@ -1,0 +1,15 @@
+CC=gcc
+
+LFLAGS = -lpcap -lpthread
+LFLAGS = `pkg-config --cflags --libs glib-2.0`
+
+
+CFLAGS = -g -Wall
+
+ifeq ($(ASN), TRUE)
+CFLAGS += -fno-omit-frame-pointer
+CFLAGS += -fsanitize=address
+LFLAGS += -lasan
+endif
+
+

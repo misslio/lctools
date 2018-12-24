@@ -1,0 +1,16 @@
+1 编译成静态库
+	make clean;make
+
+2 编译整体测试代码
+	make TEST=TRUE;
+
+3 模块测试
+	配置文件模块测试，即目录iridiumlog_conf下的测试
+	直接在 iridiumlog_conf 目录下执行
+	make clean;make
+
+	运行方法
+	 ./test ../iridiumlog_common2.conf 
+	
+	会打印该配置文件下所有的配置信息，目前需要人工核对信息是否准确，
+	下一步用代码实现完全自测
